@@ -1,0 +1,32 @@
+{
+  "name": "condrop-file-converter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "ag-psd": "31.0.2",
+    "jszip": "3.10.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "three": "0.185.1",
+    "utif": "3.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/three": "0.185.4",
+    "@types/utif": "3.0.6",
+    "@vitejs/plugin-react": "6.0.2",
+    "typescript": "5.9.3",
+    "vite": "8.0.13"
+  },
+  "packageManager": "pnpm@11.19.0"
+}
