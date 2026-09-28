@@ -3,15 +3,11 @@ import { readPsd } from "ag-psd";
 import * as UTIF from "utif";
 import * as THREE from "three";
 import { EXRLoader } from "three/examples/jsm/loaders/EXRLoader.js";
-import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
-import { USDLoader } from "three/examples/jsm/loaders/USDLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+export { acceptedImages, acceptedModels, fileExtension } from "./file-routing";
 
 export type ImageFormat = "png" | "jpg";
-export type ModelFormat = "glb" | "obj" | "usd";
+export type ModelFormat = "glb" | "obj" | "usd" | "fbx";
 
 export interface ImageOptions {
   format: ImageFormat;
@@ -31,14 +27,10 @@ export interface ImageAnalysis {
   note?: string;
 }
 
-const imageMime: Record<string, string> = {
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-  webp: "image/webp", avif: "image/avif", bmp: "image/bmp", ico: "image/x-icon",
-};
-
 const extOf = (name: string) => name.split(".").pop()?.toLowerCase() || "";
 export const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
-const safeName = (name: string) => name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim() || "layer";
+const safeName = (name: string) => Array.from(name.replace(/[\\/:*?"<>|]/g, "_")).map((c) => c.charCodeAt(0) < 32 ? "_" : c).join("").trim() || "layer";
+const usdNumber = (value: number) => String(value);
 const canvasToBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>
   new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("이미지를 인코딩하지 못했습니다.")), type, quality));
 
@@ -216,89 +208,19 @@ export async function exportImages(files: File[], options: ImageOptions, onProgr
   downloadBlob(await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } }), "condrop_images_cvt.zip");
 }
 
-type ModelPackage = { scene: THREE.Object3D; cleanup: () => void };
-
-const modelMime = (name: string) => {
-  const ext = extOf(name);
-  if (ext === "png") return "image/png";
-  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-  if (ext === "bin") return "application/octet-stream";
-  return "application/octet-stream";
-};
-
-function normalizePath(path: string) {
-  return decodeURIComponent(path).replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
-}
-
-async function parseWithLoader(name: string, data: ArrayBuffer | string, manager: THREE.LoadingManager, mtlText?: string): Promise<THREE.Object3D> {
-  const ext = extOf(name);
-  if (ext === "glb" || ext === "gltf") {
-    const loader = new GLTFLoader(manager);
-    return new Promise((resolve, reject) => loader.parse(data, "", (gltf) => resolve(gltf.scene), reject));
-  }
-  if (ext === "fbx") return new FBXLoader(manager).parse(data as ArrayBuffer, "");
-  if (ext === "obj") {
-    const loader = new OBJLoader(manager);
-    if (mtlText) {
-      const materials = new MTLLoader(manager).parse(mtlText, "");
-      materials.preload();
-      loader.setMaterials(materials);
-    }
-    return loader.parse(data as string);
-  }
-  if (["usd", "usda", "usdc", "usdz"].includes(ext)) {
-    const loader = new USDLoader(manager);
-    return new Promise((resolve, reject) => {
-      try {
-        loader.parse(data, "", (group) => resolve(group), reject);
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-  throw new Error(`지원되지 않는 3D 형식: .${ext}`);
-}
-
-async function loadModel(file: File): Promise<ModelPackage> {
-  const urls: string[] = [];
-  const manager = new THREE.LoadingManager();
-  if (extOf(file.name) !== "zip") {
-    const ext = extOf(file.name);
-    const data = ext === "obj" || ext === "gltf" ? await file.text() : await file.arrayBuffer();
-    const scene = await parseWithLoader(file.name, data, manager);
-    return { scene, cleanup: () => undefined };
-  }
-
-  const zip = await JSZip.loadAsync(file);
-  const entries = Object.values(zip.files).filter((entry) => !entry.dir && !entry.name.startsWith("__MACOSX/"));
-  const primary = entries.find((entry) => /\.(glb|gltf|fbx|obj|usd|usda|usdc|usdz)$/i.test(entry.name));
-  if (!primary) throw new Error("ZIP 안에서 OBJ, FBX, GLB, GLTF 또는 USD 모델을 찾지 못했습니다.");
-
-  const resources = new Map<string, string>();
-  for (const entry of entries) {
-    const blob = await entry.async("blob");
-    const url = URL.createObjectURL(new Blob([blob], { type: modelMime(entry.name) }));
-    urls.push(url);
-    resources.set(normalizePath(entry.name), url);
-    resources.set(normalizePath(entry.name.split("/").pop() || entry.name), url);
-  }
-  manager.setURLModifier((requested) => resources.get(normalizePath(requested)) || resources.get(normalizePath(requested.split("/").pop() || requested)) || requested);
-  const ext = extOf(primary.name);
-  const data = ext === "obj" || ext === "gltf" ? await primary.async("text") : await primary.async("arraybuffer");
-  const mtl = entries.find((entry) => /\.mtl$/i.test(entry.name));
-  const scene = await parseWithLoader(primary.name, data, manager, mtl ? await mtl.async("text") : undefined);
-  return { scene, cleanup: () => urls.forEach(URL.revokeObjectURL) };
-}
-
 function scaledScene(input: THREE.Object3D, factor: number) {
-  input.updateMatrixWorld(true);
-  input.scale.multiplyScalar(factor);
-  input.updateMatrixWorld(true);
-  return input;
+  // Keep animated root transforms intact: scale a new parent instead.
+  const root = new THREE.Group();
+  root.name = "ConDrop";
+  root.add(input);
+  root.animations = input.animations;
+  root.scale.setScalar(factor);
+  root.updateMatrixWorld(true);
+  return root;
 }
 
 async function exportGlb(scene: THREE.Object3D) {
-  const result = await new GLTFExporter().parseAsync(scene, { binary: true, onlyVisible: false, trs: false });
+  const result = await new GLTFExporter().parseAsync(scene, { binary: true, onlyVisible: false, trs: scene.animations.length > 0, animations: scene.animations, maxTextureSize: Infinity });
   return new Blob([result as ArrayBuffer], { type: "model/gltf-binary" });
 }
 
@@ -332,12 +254,6 @@ async function textureBlob(texture: THREE.Texture) {
   }
   return canvasToBlob(canvas, "image/png");
 }
-
-const usdNumber = (value: number) => {
-  if (!Number.isFinite(value)) return "0";
-  const rounded = Math.abs(value) < 1e-10 ? 0 : Number(value.toFixed(9));
-  return String(rounded);
-};
 
 const usdIdentifier = (value: string, fallback: string) => {
   const clean = value.replace(/[^A-Za-z0-9_]/g, "_").replace(/^([0-9])/, "_$1");
@@ -479,169 +395,33 @@ async function exportObj(scene: THREE.Object3D, stem: string) {
   return zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
 
-function materialUsda(materials: Map<string, THREE.Material>, textureNames = new Map<string, string>()) {
-  const lines = [`    def Scope "Materials"`, "    {"];
-  for (const [name, base] of materials) {
-    const material = base as THREE.MeshStandardMaterial;
-    const color = material.color || new THREE.Color(1, 1, 1);
-    const emissive = material.emissive || new THREE.Color(0, 0, 0);
-    const textureName = textureNames.get(material.uuid);
-    lines.push(
-      `        def Material "${name}"`,
-      "        {",
-      `            token outputs:surface.connect = </Root/Materials/${name}/PreviewSurface.outputs:surface>`,
-      `            def Shader "PreviewSurface"`,
-      "            {",
-      `                uniform token info:id = "UsdPreviewSurface"`,
-      textureName
-        ? `                color3f inputs:diffuseColor.connect = </Root/Materials/${name}/BaseColorTexture.outputs:rgb>`
-        : `                color3f inputs:diffuseColor = (${usdNumber(color.r)}, ${usdNumber(color.g)}, ${usdNumber(color.b)})`,
-      `                color3f inputs:emissiveColor = (${usdNumber(emissive.r)}, ${usdNumber(emissive.g)}, ${usdNumber(emissive.b)})`,
-      `                float inputs:metallic = ${usdNumber(material.metalness ?? 0)}`,
-      `                float inputs:roughness = ${usdNumber(material.roughness ?? 1)}`,
-      `                float inputs:opacity = ${usdNumber(material.opacity ?? 1)}`,
-      `                token outputs:surface`,
-      "            }",
-    );
-    if (textureName) {
-      lines.push(
-        `            def Shader "BaseColorTexture"`,
-        "            {",
-        `                uniform token info:id = "UsdUVTexture"`,
-        `                asset inputs:file = @./${textureName}@`,
-        `                token inputs:sourceColorSpace = "sRGB"`,
-        `                float4 inputs:scale = (${usdNumber(color.r)}, ${usdNumber(color.g)}, ${usdNumber(color.b)}, 1)`,
-        `                float2 inputs:st.connect = </Root/Materials/${name}/UVReader.outputs:result>`,
-        `                float3 outputs:rgb`,
-        `                float outputs:a`,
-        "            }",
-        `            def Shader "UVReader"`,
-        "            {",
-        `                uniform token info:id = "UsdPrimvarReader_float2"`,
-        `                token inputs:varname = "st"`,
-        `                float2 outputs:result`,
-        "            }",
-      );
-    }
-    lines.push("        }");
-  }
-  lines.push("    }");
-  return lines;
-}
-
-export function exportUsda(scene: THREE.Object3D, textureNames = new Map<string, string>()) {
-  scene.updateMatrixWorld(true);
-  const catalog = materialCatalog(scene);
-  const meshBlocks: string[] = [];
-  let meshIndex = 0;
-
-  scene.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.geometry?.attributes.position) return;
-    const geometry = mesh.geometry;
-    const position = geometry.attributes.position;
-    const normal = geometry.attributes.normal;
-    const uv = geometry.attributes.uv;
-    const index = geometry.index;
-    const { sourceMaterials, groups } = meshMaterialGroups(mesh);
-    const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
-    const points: string[] = [];
-    const normals: string[] = [];
-    const uvs: string[] = [];
-    const vector = new THREE.Vector3();
-
-    for (let vertex = 0; vertex < position.count; vertex++) {
-      mesh.getVertexPosition(vertex, vector).applyMatrix4(mesh.matrixWorld);
-      points.push(`(${usdNumber(vector.x)}, ${usdNumber(vector.y)}, ${usdNumber(vector.z)})`);
-      if (normal) {
-        vector.fromBufferAttribute(normal as THREE.BufferAttribute, vertex).applyNormalMatrix(normalMatrix);
-        normals.push(`(${usdNumber(vector.x)}, ${usdNumber(vector.y)}, ${usdNumber(vector.z)})`);
-      }
-      if (uv) uvs.push(`(${usdNumber(uv.getX(vertex))}, ${usdNumber(uv.getY(vertex))})`);
-    }
-
-    groups.forEach((group, groupIndex) => {
-      const sourceMaterial = sourceMaterials[group.materialIndex ?? 0] || sourceMaterials[0];
-      const materialName = catalog.names.get(sourceMaterial.uuid) || `Material_${meshIndex + 1}`;
-      const faceIndices: number[] = [];
-      group.ranges.forEach((range) => {
-        const end = Math.min(range.start + range.count, index ? index.count : position.count);
-        for (let offset = range.start; offset + 2 < end; offset += 3) {
-          faceIndices.push(index ? index.getX(offset) : offset, index ? index.getX(offset + 1) : offset + 1, index ? index.getX(offset + 2) : offset + 2);
-        }
-      });
-      if (!faceIndices.length) return;
-      const primName = usdIdentifier(mesh.name, `Mesh_${meshIndex + 1}`) + (groups.length > 1 ? `_Part_${groupIndex + 1}` : "");
-      const faceCounts = new Array(faceIndices.length / 3).fill(3).join(", ");
-      meshBlocks.push(
-        `    def Mesh "${primName}_${meshIndex + 1}"`,
-        "    {",
-        `        int[] faceVertexCounts = [${faceCounts}]`,
-        `        int[] faceVertexIndices = [${faceIndices.join(", ")}]`,
-        `        point3f[] points = [${points.join(", ")}]`,
-        ...(normals.length ? [`        normal3f[] normals = [${normals.join(", ")}]`, `        uniform token normalsInterpolation = "vertex"`] : []),
-        ...(uvs.length ? [`        texCoord2f[] primvars:st = [${uvs.join(", ")}]`, `        uniform token primvars:st:interpolation = "vertex"`] : []),
-        `        rel material:binding = </Root/Materials/${materialName}>`,
-        `        uniform token subdivisionScheme = "none"`,
-        `        bool doubleSided = ${sourceMaterial.side === THREE.DoubleSide ? "true" : "false"}`,
-        "    }",
-      );
-      meshIndex++;
-    });
-  });
-
-  if (!meshBlocks.length) throw new Error("USD로 내보낼 삼각형 메시를 찾지 못했습니다.");
-  const lines = [
-    "#usda 1.0",
-    "(",
-    `    defaultPrim = "Root"`,
-    `    metersPerUnit = 1`,
-    `    upAxis = "Y"`,
-    ")",
-    "",
-    `def Xform "Root"`,
-    "{",
-    ...materialUsda(catalog.materials, textureNames),
-    ...meshBlocks,
-    "}",
-    "",
-  ];
-  return new Blob([lines.join("\n")], { type: "model/vnd.usda" });
-}
-
-async function exportUsd(scene: THREE.Object3D, stem: string) {
-  const zip = new JSZip();
-  const internalStem = safeName(stem);
-  const catalog = materialCatalog(scene);
-  const textureNames = await addBaseColorTextures(zip, catalog);
-  zip.file(`${internalStem}.usd`, exportUsda(scene, textureNames));
-  return zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
-}
-
 export async function exportModels(files: File[], format: ModelFormat, scale: number, onProgress: (message: string) => void) {
+  if (!Number.isFinite(scale) || scale <= 0) throw new Error("Scale factor는 0보다 큰 숫자여야 합니다.");
+  const [{ loadModel }, { exportFbx, exportUsd }] = await Promise.all([import("./model-loader"), import("./model-export")]);
   const outputs: Array<{ name: string; blob: Blob }> = [];
+  const warnings = new Set<string>();
   for (let index = 0; index < files.length; index++) {
     const file = files[index];
     onProgress(`${index + 1}/${files.length} · ${file.name}`);
     const loaded = await loadModel(file);
+    loaded.warnings.forEach((warning) => warnings.add(warning));
     try {
       const scene = scaledScene(loaded.scene, scale);
       const stem = `${stemOf(file.name)}_cvt`;
       if (format === "glb") outputs.push({ name: `${stem}.glb`, blob: await exportGlb(scene) });
+      else if (format === "fbx") outputs.push({ name: `${stem}.zip`, blob: await exportFbx(scene, stem) });
       else if (format === "obj") outputs.push({ name: `${stem}.zip`, blob: await exportObj(scene, stem) });
       else outputs.push({ name: `${stem}.zip`, blob: await exportUsd(scene, stem) });
     } finally {
       loaded.cleanup();
     }
   }
-  if (outputs.length === 1) return downloadBlob(outputs[0].blob, outputs[0].name);
-  const zip = new JSZip();
-  outputs.forEach((output) => zip.file(output.name, output.blob));
-  downloadBlob(await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } }), "condrop_3d_cvt.zip");
+  if (outputs.length === 1) downloadBlob(outputs[0].blob, outputs[0].name);
+  else {
+    const zip = new JSZip();
+    outputs.forEach((output) => zip.file(output.name, output.blob));
+    downloadBlob(await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } }), "condrop_3d_cvt.zip");
+  }
+  return [...warnings];
 }
-
-export const acceptedImages = ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "psd", "exr"];
-export const acceptedModels = ["obj", "fbx", "glb", "gltf", "usd", "usda", "usdc", "usdz", "zip"];
-export const isAccepted = (file: File, mode: "image" | "3d") => (mode === "image" ? acceptedImages : acceptedModels).includes(extOf(file.name));
-export const fileExtension = extOf;
 export const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;

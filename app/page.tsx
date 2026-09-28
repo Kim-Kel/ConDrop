@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   acceptedImages, acceptedModels, analyzeImage, exportImages, exportModels,
-  fileExtension, formatBytes, isAccepted, type ImageAnalysis, type ImageFormat, type ModelFormat,
+  fileExtension, formatBytes, type ImageAnalysis, type ImageFormat, type ModelFormat,
 } from "./client-conversion";
+import { routeFiles } from "./file-routing";
 
 type Mode = "image" | "3d";
 type QueueItem = { id: string; file: File; analysis?: ImageAnalysis; error?: string };
@@ -16,8 +17,9 @@ const imageFormats: Array<{ value: ImageFormat; label: string; ext: string; desc
 
 const modelFormats: Array<{ value: ModelFormat; label: string; ext: string; description: string }> = [
   { value: "glb", label: "GLB", ext: ".glb", description: "Materials · animation" },
+  { value: "fbx", label: "FBX", ext: ".zip", description: "FBX + material archive" },
   { value: "obj", label: "OBJ", ext: ".zip", description: "OBJ + MTL + textures" },
-  { value: "usd", label: "USD", ext: ".zip", description: "USD + PNG textures" },
+  { value: "usd", label: "USD", ext: ".zip", description: "USD + PBR textures" },
 ];
 
 export default function Home() {
@@ -42,18 +44,19 @@ export default function Home() {
   const setItems = mode === "image" ? setImageItems : setModelItems;
   const hasLayers = imageItems.some((item) => (item.analysis?.layers || 0) > 0);
   const readyCount = items.filter((item) => !item.error).length;
-  const accept = useMemo(() => (mode === "image" ? acceptedImages : acceptedModels).map((ext) => `.${ext}`).join(","), [mode]);
+  const accept = [...acceptedImages, ...acceptedModels].map((ext) => `.${ext}`).join(",");
 
   const addFiles = async (list: FileList | File[]) => {
-    const incoming = Array.from(list);
-    const valid = incoming.filter((file) => isAccepted(file, mode));
-    const invalid = incoming.filter((file) => !isAccepted(file, mode));
-    if (invalid.length) setNotice(`지원하지 않는 파일 ${invalid.length}개를 제외했습니다: ${invalid.map((file) => file.name).join(", ")}`);
-    if (!valid.length) return;
-    const queued = valid.map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`, file }));
-    setItems((current) => [...current, ...queued]);
-    if (mode === "image") {
-      for (const item of queued) {
+    const routed = routeFiles(Array.from(list), mode);
+    const queue = (files: File[]) => files.map((file) => ({ id: crypto.randomUUID(), file }));
+    const queued = queue(routed.images);
+    setImageItems((current) => [...current, ...queued]);
+    setModelItems((current) => [...current, ...queue(routed.models)]);
+    setMode(routed.mode);
+    setNotice(routed.rejected.length
+      ? `지원하지 않는 파일 ${routed.rejected.length}개를 제외했습니다: ${routed.rejected.map((file) => file.name).join(", ")}`
+      : routed.images.length && routed.models.length ? "이미지와 3D 파일을 각각의 탭에 추가했습니다." : "");
+    for (const item of queued) {
         try {
           const analysis = await analyzeImage(item.file);
           setImageItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, analysis } : entry));
@@ -61,7 +64,6 @@ export default function Home() {
           setImageItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, error: error instanceof Error ? error.message : "파일을 읽지 못했습니다." } : entry));
         }
       }
-    }
   };
 
   const removeItem = (id: string) => {
@@ -85,7 +87,9 @@ export default function Home() {
         await exportImages(files, { format: imageFormat, resize, flipX, flipY, alpha, compression, layerMode }, setProgress);
       } else {
         if (!Number.isFinite(scale) || scale <= 0) throw new Error("Scale factor는 0보다 큰 숫자여야 합니다.");
-        await exportModels(files, modelFormat, scale, setProgress);
+        const warnings = await exportModels(files, modelFormat, scale, setProgress);
+        setNotice(`${files.length}개 파일의 변환이 완료되었습니다.${warnings.length ? ` ${warnings.join(" ")}` : ""}`);
+        return;
       }
       setNotice(`${files.length}개 파일의 변환이 완료되었습니다.`);
     } catch (error) {
@@ -116,7 +120,7 @@ export default function Home() {
             <div className="drop-icon" aria-hidden="true">↓</div>
             <div className="drop-message"><p className="eyebrow">{mode === "image" ? "IMAGE CONVERTER" : "3D CONVERTER"}</p><h1>{items.length ? `Add more ${mode === "image" ? "images" : "models"}` : `Drop your ${mode === "image" ? "images" : "3D files"} here`}</h1><p className="drop-copy">Drag & drop or click to browse — files never leave your device</p></div>
             <button className="primary-button" type="button">Choose files</button>
-            {!items.length && <p className="support-line">{mode === "image" ? "PNG · JPG · GIF · AVIF · WEBP · BMP · ICO · TIFF · PSD · EXR" : "OBJ · FBX · GLB · GLTF · USD · USDA · USDC · USDZ · ZIP"}</p>}
+            {!items.length && <p className="support-line">{mode === "image" ? "PNG · JPG · GIF · AVIF · WEBP · BMP · ICO · TIFF · PSD · EXR" : "OBJ · FBX · GLB · GLTF · USD · USDA · USDC · USDZ · SKP · STL · ZIP"}<br />File type switches tabs automatically</p>}
           </div>
 
           {items.length > 0 && <div className="converter-grid">
@@ -139,12 +143,15 @@ export default function Home() {
               {mode === "image" ? <div className="settings-stack">
                 <div className="setting-block"><div className="setting-heading"><div><strong>Resize</strong><small>Scale both dimensions proportionally.</small></div><output>{resize}%</output></div><input aria-label="Resize percentage" type="range" min="1" max="100" value={resize} onChange={(event) => setResize(Number(event.target.value))} /></div>
                 <div className="setting-block inline-setting"><div><strong>Flip</strong><small>Mirror every exported image.</small></div><div className="toggle-pair"><button className={flipX ? "active" : ""} onClick={() => setFlipX(!flipX)} type="button">X</button><button className={flipY ? "active" : ""} onClick={() => setFlipY(!flipY)} type="button">Y</button></div></div>
-                {imageFormat === "png" && <label className="check-setting"><input checked={alpha} onChange={(event) => setAlpha(event.target.checked)} type="checkbox" /><span><strong>Include alpha channel</strong><small>Preserve transparency. Off fills transparent areas with black.</small></span></label>}
+                {imageFormat === "png" && <label className="check-setting" htmlFor="include-alpha" aria-label="Include alpha channel"><input id="include-alpha" checked={alpha} onChange={(event) => setAlpha(event.target.checked)} type="checkbox" /><span><strong>Include alpha channel</strong><small>Preserve transparency. Off fills transparent areas with black.</small></span></label>}
                 {imageFormat === "jpg" && <div className="setting-block"><div className="setting-heading"><div><strong>Compression</strong><small>1 = best quality, 10 = smallest file.</small></div><output>{compression}/10</output></div><input aria-label="JPG compression" type="range" min="1" max="10" value={compression} onChange={(event) => setCompression(Number(event.target.value))} /></div>}
                 {hasLayers && <div className="setting-block"><div className="setting-heading"><div><strong>PSD layers</strong><small>Merged image or a ZIP with one image per layer.</small></div></div><div className="segmented"><button className={layerMode === "merged" ? "active" : ""} onClick={() => setLayerMode("merged")} type="button">Merged</button><button className={layerMode === "separated" ? "active" : ""} onClick={() => setLayerMode("separated")} type="button">Separated</button></div></div>}
               </div> : <div className="settings-stack">
                 <div className="setting-block"><div className="setting-heading"><div><strong>Scale factor</strong><small>Multiplies the model scale before export.</small></div></div><div className="number-field"><span>×</span><input aria-label="Scale factor" type="number" min="0.0001" step="0.1" value={scale} onChange={(event) => setScale(Number(event.target.value))} /></div></div>
-                <div className="info-strip"><span>i</span><p>For OBJ/GLTF with separate textures, upload one ZIP containing the model, material files, textures and buffers.</p></div>
+                <div className="info-strip"><span>i</span><p>For external textures or USD layers, drop a ZIP containing the model and all companion files. Keep their folder structure. Textures retain their source resolution.</p></div>
+                <div className="info-strip"><span>i</span><p>SKP / STL are input only. Stored mesh detail is preserved without simplification. STL has no UV textures. Some SKP versions and renderer-specific shaders are unsupported; NURBS surfaces must already be tessellated.</p></div>
+                {modelFormat === "fbx" && <div className="info-strip"><span>i</span><p>FBX embeds supported textures. The ZIP also includes PBR material settings and texture files, since FBX readers differ in shader support.</p></div>}
+                {modelFormat === "usd" && <div className="info-strip"><span>i</span><p>USD uses a static mesh snapshot with Preview Surface materials. Rigging, animation clips and procedural shaders are not retained in this output.</p></div>}
               </div>}
 
               <button className="convert-button" disabled={!readyCount || working} onClick={() => void convert()} type="button"><span>{working ? "Converting…" : `Convert ${readyCount} file${readyCount === 1 ? "" : "s"}`}</span><kbd>→</kbd></button>

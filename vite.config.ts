@@ -6,9 +6,12 @@ export default defineConfig({
   base: "./",
   publicDir: "../public",
   plugins: [react()],
+  optimizeDeps: {
+    noDiscovery: true,
+    include: ["react", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "three", "jszip", "ag-psd", "utif", "openskp", "@comfyorg/fbx-exporter-three"],
+  },
   build: {
     outDir: "../dist",
     emptyOutDir: true,
-    rollupOptions: { input: "index.html" },
   },
 });

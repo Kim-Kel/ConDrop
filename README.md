@@ -2,4 +2,54 @@
 
 브라우저 안에서 이미지와 3D 파일을 변환하는 정적 GitHub Pages 프로젝트입니다. 파일은 서버로 업로드되지 않으며 사용자의 PC에서 처리됩니다.
 
-by Codex
+## GitHub Pages 게시
+
+1. 이 폴더 안의 파일과 폴더를 GitHub 저장소의 최상위 경로에 업로드합니다.
+2. 기본 브랜치를 `main`으로 설정합니다.
+3. 저장소의 **Settings → Pages → Build and deployment → Source**에서 **GitHub Actions**를 선택합니다.
+4. `main` 브랜치에 변경 사항을 푸시하면 배포가 자동으로 시작됩니다.
+
+워크플로는 의존성을 설치하고 정적 사이트를 빌드한 뒤 GitHub Pages에 게시합니다. 별도의 API 키나 서버 환경 변수가 필요하지 않습니다.
+
+## 로컬 실행
+
+Node.js 22 이상과 pnpm이 필요합니다.
+
+```bash
+pnpm install
+pnpm dev
+```
+
+프로덕션 빌드는 다음 명령으로 확인할 수 있습니다.
+
+```bash
+pnpm build
+```
+
+## 변환 기능과 제약
+
+- 파일 종류에 따라 Image ↔ 3D 탭이 자동으로 전환됩니다. 혼합 파일은 각각의 큐에 보관합니다.
+- FBX 입력·출력, USD/USDA/USDC/USDZ 입력·USD 출력, SKP/STL 입력을 지원합니다.
+- 외부 텍스처·재질·버퍼·USD 참조 레이어는 모델과 같은 ZIP에 넣고 폴더 구조를 유지하세요.
+- FBX 출력 ZIP에는 모델과 PBR 재질 보조 JSON/PNG가 들어 있습니다. USD 출력 ZIP에는 `.usd`와 참조 레이어·PNG가 포함됩니다.
+- NURBS 원본 곡면, 일부 SKP 버전, 렌더러 전용 셰이더의 완전한 보존은 지원하지 않습니다. USD 출력은 정적 메시입니다.
+
+자세한 품질 범위와 조사 자료는 [FORMAT_SUPPORT.md](FORMAT_SUPPORT.md)를 확인하세요.
+
+## 자동 검사
+
+```bash
+pnpm typecheck
+pnpm exec playwright install chromium
+pnpm test:browser
+pnpm build
+```
+
+Windows 테스트는 Edge를, GitHub Actions는 Chromium을 사용합니다. 이 설치 과정은 개발·CI용이며 사이트 방문자에게 요구되지 않습니다.
+
+## 포함하지 않은 항목
+
+- ChatGPT/Sites 프로젝트 ID와 호스팅 설정
+- API 키, 환경 변수 및 인증 코드
+- 서버·데이터베이스 코드
+- 외부 테스트 샘플, 빌드 결과물 및 개발 캐시

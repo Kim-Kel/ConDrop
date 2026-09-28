@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   color-scheme: dark;
   --bg: #0a0c0f;
@@ -110,6 +112,7 @@ input[type="range"]::-webkit-slider-thumb { width: 14px; height: 14px; appearanc
 .convert-button kbd { font: 18px "Segoe UI",sans-serif; }
 .filename-note { margin: 10px 17px 0; color: #6e7783; text-align: center; font-size: 10px; }
 .filename-note code { color: #bdc5ce; font: 10px Consolas, monospace; }
+.format-grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .statusbar { position: sticky; bottom: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; border-top: 1px solid var(--line); color: #737c87; background: rgba(15,18,22,.97); font: 11px Consolas, monospace; }
 .statusbar i { display: inline-block; width: 5px; height: 5px; margin-right: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .statusbar i.busy { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse .8s infinite alternate; }
