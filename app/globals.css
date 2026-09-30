@@ -97,6 +97,7 @@ input[type="range"]::-webkit-slider-thumb { width: 14px; height: 14px; appearanc
 .toggle-pair button, .segmented button { min-width: 43px; height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
 .toggle-pair button.active, .segmented button.active { color: white; background: var(--accent-soft); box-shadow: inset 0 0 0 1px rgba(255,112,72,.25); }
 .segmented { margin-top: 12px; }
+.segmented[aria-label="STEP 테셀레이션 품질"] { grid-template-columns: repeat(3, 1fr); margin-bottom: 8px; }
 .check-setting { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .check-setting input { width: 17px; height: 17px; margin: 1px 0 0; accent-color: var(--accent); }
 .check-setting span { flex: 1; }

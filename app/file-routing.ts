@@ -1,6 +1,6 @@
 export type ConverterMode = "image" | "3d";
 export const acceptedImages = ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "psd", "exr"];
-export const acceptedModels = ["obj", "fbx", "glb", "gltf", "usd", "usda", "usdc", "usdz", "skp", "stl", "zip"];
+export const acceptedModels = ["obj", "fbx", "glb", "gltf", "usd", "usda", "usdc", "usdz", "skp", "stl", "stp", "step", "zip"];
 export const fileExtension = (name: string) => name.split(".").pop()?.toLowerCase() || "";
 
 // Classify the whole drop, independently of the selected tab. Mixed drops keep

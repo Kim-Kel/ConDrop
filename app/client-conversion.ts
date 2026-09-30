@@ -4,6 +4,7 @@ import * as UTIF from "utif";
 import * as THREE from "three";
 import { EXRLoader } from "three/examples/jsm/loaders/EXRLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import type { ModelLoadOptions } from "./step-options";
 export { acceptedImages, acceptedModels, fileExtension } from "./file-routing";
 
 export type ImageFormat = "png" | "jpg";
@@ -376,7 +377,7 @@ export function exportObjText(scene: THREE.Object3D, stem: string, catalog = mat
   return lines.join("\n");
 }
 
-async function exportObj(scene: THREE.Object3D, stem: string) {
+export async function exportObj(scene: THREE.Object3D, stem: string) {
   const zip = new JSZip();
   const internalStem = safeName(stem);
   const catalog = materialCatalog(scene);
@@ -385,7 +386,7 @@ async function exportObj(scene: THREE.Object3D, stem: string) {
   const lines = [`# ConDrop material package`, `# Generated locally in your browser`, ``];
   for (const [name, base] of catalog.materials) {
     const material = base as THREE.MeshStandardMaterial;
-    const color = material.color || new THREE.Color(1, 1, 1);
+    const color = (material.color || new THREE.Color(1, 1, 1)).clone().convertLinearToSRGB();
     lines.push(`newmtl ${name}`, `Kd ${color.r.toFixed(6)} ${color.g.toFixed(6)} ${color.b.toFixed(6)}`, `d ${(material.opacity ?? 1).toFixed(6)}`);
     const textureName = textureNames.get(material.uuid);
     if (textureName) lines.push(`map_Kd ${textureName}`);
@@ -395,7 +396,7 @@ async function exportObj(scene: THREE.Object3D, stem: string) {
   return zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
 
-export async function exportModels(files: File[], format: ModelFormat, scale: number, onProgress: (message: string) => void) {
+export async function exportModels(files: File[], format: ModelFormat, scale: number, onProgress: (message: string) => void, options: ModelLoadOptions = {}) {
   if (!Number.isFinite(scale) || scale <= 0) throw new Error("Scale factor는 0보다 큰 숫자여야 합니다.");
   const [{ loadModel }, { exportFbx, exportUsd }] = await Promise.all([import("./model-loader"), import("./model-export")]);
   const outputs: Array<{ name: string; blob: Blob }> = [];
@@ -403,7 +404,7 @@ export async function exportModels(files: File[], format: ModelFormat, scale: nu
   for (let index = 0; index < files.length; index++) {
     const file = files[index];
     onProgress(`${index + 1}/${files.length} · ${file.name}`);
-    const loaded = await loadModel(file);
+    const loaded = await loadModel(file, options);
     loaded.warnings.forEach((warning) => warnings.add(warning));
     try {
       const scene = scaledScene(loaded.scene, scale);

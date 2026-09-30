@@ -10,6 +10,7 @@ import { USDLoader } from "three/examples/jsm/loaders/USDLoader.js";
 import "./usd-materials";
 import { acceptedModels, fileExtension } from "./file-routing";
 import { validateFbxGeometry } from "./fbx-validation";
+import { stepQuality, type ModelLoadOptions } from "./step-options";
 
 export function normalizePath(path: string) {
   try { path = decodeURIComponent(path); } catch { /* Literal percent in filenames. */ }
@@ -80,8 +81,12 @@ function validateScene(scene: THREE.Object3D) {
   if (!vertices) throw new Error("변환할 메시가 없습니다. NURBS 곡면은 테셀레이션된 메시로 저장되어 있어야 합니다.");
 }
 
-async function parseModel(name: string, data: ArrayBuffer, manager: THREE.LoadingManager, base: string, mtl?: { text: string; base: string }) {
+async function parseModel(name: string, data: ArrayBuffer, manager: THREE.LoadingManager, base: string, options: ModelLoadOptions, mtl?: { text: string; base: string }) {
   const ext = fileExtension(name);
+  if (ext === "stp" || ext === "step") {
+    const { loadStep } = await import("./step-loader");
+    return loadStep(data, options.tessellation);
+  }
   if (ext === "gltf" || ext === "glb") {
     const gltf = await new GLTFLoader(manager).parseAsync(data, base);
     gltf.scene.animations = gltf.animations;
@@ -137,7 +142,7 @@ async function parseModel(name: string, data: ArrayBuffer, manager: THREE.Loadin
   throw new Error(`지원되지 않는 3D 형식: .${ext}`);
 }
 
-export async function loadModel(file: File) {
+export async function loadModel(file: File, options: ModelLoadOptions = {}) {
   const resources = new Map<string, ArrayBuffer>();
   let primary = file.name;
   let data = await file.arrayBuffer();
@@ -194,7 +199,7 @@ export async function loadModel(file: File) {
       for (const [name, bytes] of resources) if (name !== primary) zip.file(name, bytes, { createFolders: false });
       data = await zip.generateAsync({ type: "arraybuffer", compression: "STORE" });
     }
-    scene = await parseModel(primary, data, manager, base, mtl);
+    scene = await parseModel(primary, data, manager, base, options, mtl);
     const archive = [...resources.keys()].find((path) => path === "condrop-materials.json");
     if (ext === "fbx" && archive) {
       const { restoreMaterialArchive } = await import("./model-export");
@@ -205,6 +210,7 @@ export async function loadModel(file: File) {
     if (failures.length) throw new Error(`텍스처·버퍼 ${failures.length}개를 읽지 못했습니다. ZIP의 리소스를 확인해 주세요.`);
     validateScene(scene);
     const warnings: string[] = [];
+    if (ext === "stp" || ext === "step") warnings.push(`STEP: 테셀레이션 ${stepQuality[options.tessellation || "high"].label}. 형상·법선·부품/면 색상을 변환했습니다. 텍스처·전용 셰이더·투명도는 지원하지 않으며, 출력은 곡면 편집 정보가 없는 메시입니다.`);
     if (ext === "skp") warnings.push("SKP: 저장된 면과 PNG/JPEG 텍스처를 변환했습니다. 일부 전용 요소는 지원되지 않습니다.");
     if (ext === "stl") warnings.push("STL: 원본 삼각형과 법선을 유지했습니다. UV·텍스처 정보는 STL에 없습니다.");
     return { scene, cleanup, warnings };

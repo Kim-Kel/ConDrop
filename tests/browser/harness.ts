@@ -5,6 +5,8 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { exportFbx, exportUsd } from "../../app/model-export";
 import { loadModel, resourcePath } from "../../app/model-loader";
 import { routeFiles } from "../../app/file-routing";
+import { exportObj } from "../../app/client-conversion";
+import type { TessellationQuality } from "../../app/step-options";
 
 function check(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
 const file = async (blob: Blob, name: string) => new File([blob], name);
@@ -132,6 +134,7 @@ export async function runFailures() {
   };
   await expectError(new File(["mtllib missing.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3"], "missing.obj"), /리소스/);
   await expectError(new File(["invalid"], "bad.skp"), /SKP/);
+  await expectError(new File(["invalid"], "bad.stp"), /STEP/);
   await expectError(new File(['Geometry: 1, "Geometry::Surface", "NurbsSurface" {\n}'], "nurbs.fbx"), /NurbsSurface/);
   await expectError(new File(["#usda 1.0\ndef Xform \"Root\" (\n prepend references = @missing.usda@\n)\n{\n}\n"], "missing.usd"), /리소스/);
   await expectError(new File(["#usda 1.0\ndef NurbsPatch \"Surface\"\n{\n}\n"], "nurbs.usda"), /NurbsPatch/);
@@ -176,5 +179,52 @@ export function runRouting() {
   const result = routeFiles([{ name: "A.FBX" }, { name: "a.png" }, { name: "b.skp" }, { name: "bad.txt" }], "image");
   check(result.mode === "3d" && result.models.length === 2 && result.images.length === 1 && result.rejected.length === 1, "mixed routing");
   check(routeFiles([{ name: "a.PNG" }], "3d").mode === "image", "reverse routing");
+  check(routeFiles([{ name: "a.STP" }, { name: "b.STEP" }], "image").models.length === 2, "STEP extensions");
   return true;
+}
+
+export async function inspectStep(bytes: number[], quality: TessellationQuality, zipped = false) {
+  const input = zipped
+    ? new File([await new JSZip().file("part/curved.STEP", new Uint8Array(bytes)).generateAsync({ type: "arraybuffer" })], "model.zip")
+    : new File([new Uint8Array(bytes)], "curved.STP");
+  const loaded = await loadModel(input, { tessellation: quality });
+  try {
+    const info = stats(loaded.scene);
+    check(loaded.scene.userData.stepTessellation === quality, "STEP quality passed through");
+    let normalCount = 0;
+    loaded.scene.traverse((o) => { const mesh = o as THREE.Mesh; if (mesh.isMesh) normalCount += mesh.geometry.getAttribute("normal").count; });
+    check(normalCount > 0, "STEP normals");
+    return { triangles: info.triangles, size: info.size, hierarchy: loaded.scene.children.map((o) => o.name) };
+  } finally { loaded.cleanup(); }
+}
+
+export async function stepColorRoundTrip(bytes: number[]) {
+  const loaded = await loadModel(new File([new Uint8Array(bytes)], "colors.step"));
+  const faceColors = (scene: THREE.Object3D) => {
+    const colors = new Map<string, number>();
+    scene.traverse((o) => {
+      const mesh = o as THREE.Mesh; if (!mesh.isMesh) return;
+      const palette = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const groups = mesh.geometry.groups.length ? mesh.geometry.groups : [{ start: 0, count: mesh.geometry.index?.count || mesh.geometry.getAttribute("position").count, materialIndex: 0 }];
+      for (const group of groups) {
+        const color = (palette[group.materialIndex || 0] as THREE.MeshStandardMaterial).color.toArray().map((v) => v.toFixed(4)).join(",");
+        colors.set(color, (colors.get(color) || 0) + group.count / 3);
+      }
+    });
+    return [...colors.entries()].sort();
+  };
+  try {
+    const before = faceColors(loaded.scene);
+    check(before.length === 6 && before.every(([, count]) => count === 2), "six distinct CAD face colors");
+    for (const exporter of [exportFbx, exportObj, exportUsd]) {
+      const output = await exporter(loaded.scene, "colors");
+      const roundtrip = await loadModel(new File([output], "colors.zip"));
+      try {
+        check(JSON.stringify(faceColors(roundtrip.scene)) === JSON.stringify(before), `STEP ${exporter.name} face colors`);
+        check(stats(roundtrip.scene).triangles === 12, "STEP exported topology");
+        check(stats(roundtrip.scene).size.every((n, i) => Math.abs(n - stats(loaded.scene).size[i]) < 1e-6), "STEP export size");
+      } finally { roundtrip.cleanup(); }
+    }
+    return before;
+  } finally { loaded.cleanup(); }
 }

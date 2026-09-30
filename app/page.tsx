@@ -6,6 +6,7 @@ import {
   fileExtension, formatBytes, type ImageAnalysis, type ImageFormat, type ModelFormat,
 } from "./client-conversion";
 import { routeFiles } from "./file-routing";
+import { stepQuality, type TessellationQuality } from "./step-options";
 
 type Mode = "image" | "3d";
 type QueueItem = { id: string; file: File; analysis?: ImageAnalysis; error?: string };
@@ -37,6 +38,7 @@ export default function Home() {
   const [compression, setCompression] = useState(4);
   const [layerMode, setLayerMode] = useState<"merged" | "separated">("merged");
   const [scale, setScale] = useState(1);
+  const [tessellation, setTessellation] = useState<TessellationQuality>("high");
   const [working, setWorking] = useState(false);
   const [progress, setProgress] = useState("");
   const [notice, setNotice] = useState("");
@@ -87,7 +89,7 @@ export default function Home() {
         await exportImages(files, { format: imageFormat, resize, flipX, flipY, alpha, compression, layerMode }, setProgress);
       } else {
         if (!Number.isFinite(scale) || scale <= 0) throw new Error("Scale factor는 0보다 큰 숫자여야 합니다.");
-        const warnings = await exportModels(files, modelFormat, scale, setProgress);
+        const warnings = await exportModels(files, modelFormat, scale, setProgress, { tessellation });
         setNotice(`${files.length}개 파일의 변환이 완료되었습니다.${warnings.length ? ` ${warnings.join(" ")}` : ""}`);
         return;
       }
@@ -120,7 +122,7 @@ export default function Home() {
             <div className="drop-icon" aria-hidden="true">↓</div>
             <div className="drop-message"><p className="eyebrow">{mode === "image" ? "IMAGE CONVERTER" : "3D CONVERTER"}</p><h1>{items.length ? `Add more ${mode === "image" ? "images" : "models"}` : `Drop your ${mode === "image" ? "images" : "3D files"} here`}</h1><p className="drop-copy">Drag & drop or click to browse — files never leave your device</p></div>
             <button className="primary-button" type="button">Choose files</button>
-            {!items.length && <p className="support-line">{mode === "image" ? "PNG · JPG · GIF · AVIF · WEBP · BMP · ICO · TIFF · PSD · EXR" : "OBJ · FBX · GLB · GLTF · USD · USDA · USDC · USDZ · SKP · STL · ZIP"}<br />File type switches tabs automatically</p>}
+            {!items.length && <p className="support-line">{mode === "image" ? "PNG · JPG · GIF · AVIF · WEBP · BMP · ICO · TIFF · PSD · EXR" : "OBJ · FBX · GLB · GLTF · USD · USDA · USDC · USDZ · SKP · STL · STP · STEP · ZIP"}<br />File type switches tabs automatically</p>}
           </div>
 
           {items.length > 0 && <div className="converter-grid">
@@ -147,6 +149,7 @@ export default function Home() {
                 {imageFormat === "jpg" && <div className="setting-block"><div className="setting-heading"><div><strong>Compression</strong><small>1 = best quality, 10 = smallest file.</small></div><output>{compression}/10</output></div><input aria-label="JPG compression" type="range" min="1" max="10" value={compression} onChange={(event) => setCompression(Number(event.target.value))} /></div>}
                 {hasLayers && <div className="setting-block"><div className="setting-heading"><div><strong>PSD layers</strong><small>Merged image or a ZIP with one image per layer.</small></div></div><div className="segmented"><button className={layerMode === "merged" ? "active" : ""} onClick={() => setLayerMode("merged")} type="button">Merged</button><button className={layerMode === "separated" ? "active" : ""} onClick={() => setLayerMode("separated")} type="button">Separated</button></div></div>}
               </div> : <div className="settings-stack">
+                <div className="setting-block"><div className="setting-heading"><div><strong>STEP 테셀레이션 품질</strong><small>STP/STEP 및 ZIP 내부 STEP에 적용됩니다. 상: 매끄러운 곡면 · 하: 빠른 변환, 작은 파일.</small></div></div><div className="segmented" role="group" aria-label="STEP 테셀레이션 품질">{(Object.keys(stepQuality) as TessellationQuality[]).map((quality) => <button key={quality} className={tessellation === quality ? "active" : ""} aria-pressed={tessellation === quality} onClick={() => setTessellation(quality)} type="button">{stepQuality[quality].label}</button>)}</div><small>STEP의 부품·면 색상과 법선을 보존합니다. 텍스처·전용 셰이더·투명도는 지원하지 않습니다.</small></div>
                 <div className="setting-block"><div className="setting-heading"><div><strong>Scale factor</strong><small>Multiplies the model scale before export.</small></div></div><div className="number-field"><span>×</span><input aria-label="Scale factor" type="number" min="0.0001" step="0.1" value={scale} onChange={(event) => setScale(Number(event.target.value))} /></div></div>
                 <div className="info-strip"><span>i</span><p>For external textures or USD layers, drop a ZIP containing the model and all companion files. Keep their folder structure. Textures retain their source resolution.</p></div>
                 <div className="info-strip"><span>i</span><p>SKP / STL are input only. Stored mesh detail is preserved without simplification. STL has no UV textures. Some SKP versions and renderer-specific shaders are unsupported; NURBS surfaces must already be tessellated.</p></div>

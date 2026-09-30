@@ -4,6 +4,53 @@ import fs from "node:fs";
 import JSZip from "jszip";
 
 const harness = `/@fs/${path.resolve("tests/browser/harness.ts").replaceAll("\\", "/")}`;
+const stepFixture = (name: string) => fs.readFileSync(`node_modules/occt-import-js/test/testfiles/${name}`);
+
+test("STEP curved tessellation levels, ZIP, assembly hierarchy and units", async ({ page, context }) => {
+  const external: string[] = [];
+  context.on("request", request => { if (/^https?:/.test(request.url()) && !request.url().startsWith("http://127.0.0.1:4173")) external.push(request.url()); });
+  await page.goto("/");
+  const inspect = (bytes: Buffer, quality: "low" | "medium" | "high", zipped = false) => page.evaluate(async ({ harness, bytes, quality, zipped }) => (await import(/* @vite-ignore */ harness)).inspectStep(bytes, quality, zipped), { harness, bytes: Array.from(bytes), quality, zipped });
+  const rounded = stepFixture("rounded-cube/rounded-cube.step");
+  const low = await inspect(rounded, "low");
+  const medium = await inspect(rounded, "medium");
+  const high = await inspect(rounded, "high", true);
+  expect(low.triangles).toBeLessThan(medium.triangles);
+  expect(medium.triangles).toBeLessThan(high.triangles);
+  for (const unit of ["mm", "m", "in"]) {
+    const result = await inspect(stepFixture(`cube-units/cube-${unit}.step`), "medium");
+    expect(result.hierarchy).toEqual(["Part"]);
+    for (const side of result.size) expect(side).toBeCloseTo(1, 6);
+  }
+  expect(external).toEqual([]);
+  console.log("STEP triangle counts", { low: low.triangles, medium: medium.triangles, high: high.triangles });
+});
+
+test("STEP per-face colors survive FBX, OBJ/MTL and USD export", async ({ page }) => {
+  await page.goto("/");
+  const result = await page.evaluate(async ({ harness, bytes }) => (await import(/* @vite-ignore */ harness)).stepColorRoundTrip(bytes), { harness, bytes: Array.from(stepFixture("cube-fcstd/cube2.step")) });
+  expect(result).toHaveLength(6);
+});
+
+test("STEP input switches tabs, quality changes the downloaded output", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({ name: "curved.stp", mimeType: "application/octet-stream", buffer: stepFixture("rounded-cube/rounded-cube.step") });
+  await expect(page.getByRole("button", { name: "3D", exact: true })).toHaveClass("active");
+  const counts: number[] = [];
+  for (const [quality, format] of [["하", "GLB"], ["중", "OBJ"], ["상", "FBX"], ["상", "USD"]]) {
+    const choice = page.getByRole("group", { name: "STEP 테셀레이션 품질" }).getByRole("button", { name: quality, exact: true });
+    await choice.click(); await expect(choice).toHaveAttribute("aria-pressed", "true");
+    await page.locator(".format-card").filter({ has: page.locator("strong", { hasText: new RegExp(`^${format}$`) }) }).click();
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Convert 1 file" }).click();
+    const saved = await download;
+    const bytes = fs.readFileSync((await saved.path())!);
+    const info = await page.evaluate(async ({ harness, bytes, name }) => (await import(/* @vite-ignore */ harness)).inspectFile(bytes, name), { harness, bytes: Array.from(bytes), name: saved.suggestedFilename() });
+    counts.push(info.triangles);
+    await expect(page.getByRole("button", { name: "Convert 1 file" })).toBeEnabled();
+  }
+  expect(counts[0]).toBeLessThan(counts[1]); expect(counts[1]).toBeLessThan(counts[2]); expect(counts[2]).toBe(counts[3]);
+});
 for (const name of ["runRouting", "runStl", "runSkp", "runObjTextures", "runGlbAnimation", "runFbxRoundTrip", "runUsdRoundTrip", "runFailures"]) {
   test(name, async ({ page }) => {
     const external: string[] = [];

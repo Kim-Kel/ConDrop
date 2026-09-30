@@ -1,0 +1,14 @@
+STEP support uses occt-import-js 0.0.23 by Viktor Kovacs and contributors,
+including the Open CASCADE Technology CAD kernel.
+
+occt-import-js is distributed under GNU LGPL 2.1. The unmodified library's
+JavaScript and WebAssembly are served as separate assets by this site.
+License: occt-import-js-LGPL-2.1.txt (in this directory).
+Corresponding importer source and build instructions:
+https://github.com/kovacsv/occt-import-js/tree/c2148e54b456b571238d35cac037d304053d64b2
+The source tree's occt submodule identifies the corresponding CAD kernel source.
+Open CASCADE Technology license information:
+https://dev.opencascade.org/resources/licensing
+
+The library is provided without warranty. STEP conversion runs locally.
+The ConDrop adapter does not change the bundled library or its WASM binary.
